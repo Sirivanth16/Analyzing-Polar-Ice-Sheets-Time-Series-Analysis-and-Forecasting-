@@ -1,0 +1,289 @@
+---
+title: "Ice Caps Data Cleaning"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(zoo)
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(fpp)
+library(vars)
+```
+
+## Combining and Preparing Data: North
+```{r}
+
+icecaps_N <- data.frame()
+
+# Loop through the 12 CSV files
+for (i in 1:12) {
+  if (i < 10){
+    df <- read.csv(paste0("N_0", i, "_extent_v3.0.csv"))
+  }
+  if (i >= 10){
+    df <- read.csv(paste0("N_", i, "_extent_v3.0.csv"))
+  }
+  icecaps_N <- rbind(icecaps_N, df)
+}
+
+# Combine the year and month columns into a new "date" column and convert to a year-month format
+icecaps_N <- icecaps_N %>%
+  mutate(date = ym(paste(year, str_pad(mo, 2, pad = "0"), sep = "-"))) %>%
+  mutate(date = as.yearmon(date)) %>%
+  dplyr::select(date, extent, area) %>% # Select only the date and extent columns
+  arrange(date) %>% # Sort by the date column
+  mutate(extent = replace(extent, extent == -9999.00, NA), # Replace -9999.00 with NA in the extent column
+         area = replace(area, area == -9999.00, NA)) # Replace -9999.00 with NA in the area column
+
+head(icecaps_N)
+```
+
+## Combining and Preparing Data: South
+```{r}
+
+icecaps_S <- data.frame()
+
+# Loop through the 12 CSV files
+for (i in 1:12) {
+  if (i < 10){
+    df <- read.csv(paste0("S_0", i, "_extent_v3.0.csv"))
+  }
+  if (i >= 10){
+    df <- read.csv(paste0("S_", i, "_extent_v3.0.csv"))
+  }
+  icecaps_S <- rbind(icecaps_S, df)
+}
+
+# Combine the year and month columns into a new "date" column and convert to a year-month format
+icecaps_S <- icecaps_S %>%
+  mutate(date = ym(paste(year, str_pad(mo, 2, pad = "0"), sep = "-"))) %>%
+  mutate(date = as.yearmon(date)) %>%
+  dplyr::select(date, extent, area) %>% # Select only the date and extent columns
+  arrange(date) %>% # Sort by the date column
+  mutate(extent = replace(extent, extent == -9999.00, NA), # Replace -9999.00 with NA in the extent column
+         area = replace(area, area == -9999.00, NA)) # Replace -9999.00 with NA in the area column
+
+
+head(icecaps_S)
+
+```
+
+## Handling Missing Data for North and South
+```{r}
+
+# Function that imputates missing data by replacing missing values with the average of all values of the same month
+
+fill_missing <- function(df) {
+  for (i in 1:nrow(df)){
+    if (is.na(df[i, "extent"])){ # if there is a missing value in extent column
+      my_sum <- 0
+      month_count <- 0
+      df_month <- month(df[i,"date"]) # store the month of missing value
+      for (j in 1:nrow(df)){ 
+          if (i != j){
+            # take the average of extents of all same months
+            if (month(df[j,"date"]) == df_month){ 
+              my_sum <- my_sum + (df[j,"extent"])
+              month_count <- month_count + 1
+            }
+          }
+      }
+      # replace missing value with calculated average
+      df[i, "extent"] <- (my_sum/month_count)
+    }
+    
+    if (is.na(df[i, "area"])){ # if there is a missing value in extent column
+      my_sum <- 0
+      month_count <- 0
+      df_month <- month(df[i,"date"]) # store the month of missing value
+      for (j in 1:nrow(df)){ 
+          if (i != j){
+            # take the average of extents of all same months
+            if (month(df[j,"date"]) == df_month){ 
+              my_sum <- my_sum + (df[j,"area"])
+              month_count <- month_count + 1
+            }
+          }
+      }
+      # replace missing value with calculated average
+      df[i, "area"] <- (my_sum/month_count)
+    }
+  }
+  df
+  }
+
+```
+
+
+```{r}
+icecaps_N <- fill_missing(icecaps_N)
+icecaps_S <- fill_missing(icecaps_S)
+```
+
+```{r}
+head(icecaps_N)
+tail(icecaps_N)
+```
+
+## Plotting the Data
+
+```{r}
+ts_extent_N <- ts(icecaps_N$extent, start=c(1979,1), frequency=12)
+ts_area_N <- ts(icecaps_N$area, start=c(1979,1), frequency=12)
+
+
+autoplot(ts_extent_N, xlab = "Year", ylab = "Extent", main = "Original Time Series Extent (North)")
+autoplot(ts_area_N, xlab = "Year", ylab = "Area", main = "Original Time Series Area (North)")
+```
+
+### Getting train and test data
+```{r}
+train_extent_N <- window(ts_extent_N, start = c(1990, 1), end = c(2019, 12))
+test_extent_N <- window(ts_extent_N, start = c(2020, 1))
+```
+
+```{r}
+test_extent_N
+```
+```{r}
+train_extent_N
+```
+
+
+```{r}
+head(test_extent_N)
+tail(test_extent_N)
+```
+
+
+```{r}
+head(train_extent_N)
+tail(train_extent_N)
+```
+
+
+```{r}
+# Create a time series object
+Time_plot <- ts(train_extent_N, start = c(1990, 1), end = c(2019, 12), frequency = 12)
+
+# Plot the time series
+plot(Time_plot)
+
+```
+
+```{r}
+head(Time_plot)
+tail(Time_plot)
+```
+
+```{r}
+additive <- decompose(x = Time_plot, type="additive")
+plot(additive)
+```
+
+
+```{r}
+multiplicative <- decompose(x = Time_plot, type="multiplicative")
+plot(multiplicative)
+```
+
+```{r}
+hw_additive <- hw(Time_plot, h=41, seasonal="additive",damped=FALSE)
+plot(hw_additive)
+```
+
+
+```{r}
+hw_multiplicative <- hw(Time_plot, h=41, seasonal="multiplicative",damped=FALSE) 
+plot(hw_multiplicative)
+```
+
+
+```{r}
+hw_additive_damping <- hw(Time_plot, h=41, seasonal="additive",damped=TRUE) 
+plot(hw_additive_damping)
+```
+
+
+```{r}
+hw_multiplicative_damping <- hw(Time_plot, h=41, seasonal="multiplicative",damped=TRUE) 
+plot(hw_multiplicative_damping)
+```
+
+
+```{r}
+snaive_forecast <- snaive(Time_plot, h = 41)
+plot(snaive_forecast)
+```
+
+
+```{r}
+accuracy(hw_additive)
+```
+
+
+```{r}
+accuracy(hw_multiplicative)
+```
+
+
+```{r}
+accuracy(hw_additive_damping)
+```
+
+
+```{r}
+accuracy(hw_multiplicative_damping)
+```
+
+
+```{r}
+accuracy(snaive_forecast)
+```
+
+
+```{r}
+checkresiduals(hw_additive_damping)
+```
+
+
+```{r}
+summary(hw_additive_damping)
+```
+```{r}
+accuracy(hw_additive_damping)
+```
+
+```{r}
+class(test_extent_N)
+class(hw_additive_damping)
+```
+
+
+```{r}
+plot(hw_additive_damping$mean,  xlab = "Months", ylab = "Extent", col = "red", ylim=c(0,20))
+lines(test_extent_N, col = "blue")
+legend("bottomleft", legend = c("Extent Forecast", "Original Time Series"), col = c("red", "blue"), lty = c(1,1))
+```
+```{r}
+Pacf(residuals(hw_additive_damping))
+```
+
+
+```{r}
+Acf(residuals(hw_additive_damping))
+```
+
+```{r}
+rmse <- sqrt(mean(( - test_extent_N)^2))
+```
+
